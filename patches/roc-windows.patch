@@ -1,0 +1,1981 @@
+diff --git a/src/internal_modules/roc_address/target_windows/roc_address/socket_addr.cpp b/src/internal_modules/roc_address/target_windows/roc_address/socket_addr.cpp
+new file mode 100644
+index 0000000..7a26d25
+--- /dev/null
++++ b/src/internal_modules/roc_address/target_windows/roc_address/socket_addr.cpp
+@@ -0,0 +1,210 @@
++/*
++ * Copyright (c) 2015 Roc Streaming authors
++ *
++ * This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
++ */
++
++
++
++#include "roc_address/socket_addr.h"
++#include "roc_core/endian.h"
++
++namespace roc {
++namespace address {
++
++SocketAddr::SocketAddr() {
++    clear();
++}
++
++void SocketAddr::clear() {
++    memset(&saddr_, 0, sizeof(saddr_));
++}
++
++bool SocketAddr::has_host_port() const {
++    return saddr_family_() == AF_INET || saddr_family_() == AF_INET6;
++}
++
++bool SocketAddr::set_host_port_saddr(const sockaddr* sa) {
++    const socklen_t sa_size = saddr_size_(sa->sa_family);
++    if (sa_size == 0) {
++        return false;
++    }
++
++    memcpy(&saddr_, sa, (size_t)sa_size);
++
++    return true;
++}
++
++bool SocketAddr::set_host_port_auto(const char* host, int port) {
++    return set_host_port(Family_IPv4, host, port)
++        || set_host_port(Family_IPv6, host, port);
++}
++
++bool SocketAddr::set_host_port(AddrFamily type, const char* ip_str, int port) {
++    switch (type) {
++    case Family_IPv4:
++        return set_host_port_ipv4_(ip_str, port);
++    case Family_IPv6:
++        return set_host_port_ipv6_(ip_str, port);
++    default:
++        return false;
++    }
++}
++
++bool SocketAddr::set_host_port_ipv4_(const char* ip_str, int port) {
++    in_addr addr;
++    if (inet_pton(AF_INET, ip_str, &addr) != 1) {
++        return false;
++    }
++
++    saddr_.addr4.sin_family = AF_INET;
++    saddr_.addr4.sin_addr = addr;
++    saddr_.addr4.sin_port = (unsigned short)core::hton16u((uint16_t)port);
++
++    return true;
++}
++
++bool SocketAddr::set_host_port_ipv6_(const char* ip_str, int port) {
++    in6_addr addr;
++    if (inet_pton(AF_INET6, ip_str, &addr) != 1) {
++        return false;
++    }
++
++    saddr_.addr6.sin6_family = AF_INET6;
++    saddr_.addr6.sin6_addr = addr;
++    saddr_.addr6.sin6_port = (unsigned short)core::hton16u((uint16_t)port);
++
++    return true;
++}
++
++sockaddr* SocketAddr::saddr() {
++    return (sockaddr*)&saddr_;
++}
++
++const sockaddr* SocketAddr::saddr() const {
++    return (const sockaddr*)&saddr_;
++}
++
++socklen_t SocketAddr::slen() const {
++    return saddr_size_(saddr_family_());
++}
++
++socklen_t SocketAddr::max_slen() const {
++    return saddr_size_(AF_INET6);
++}
++
++AddrFamily SocketAddr::family() const {
++    switch (saddr_family_()) {
++    case AF_INET:
++        return Family_IPv4;
++    case AF_INET6:
++        return Family_IPv6;
++    default:
++        return Family_Unknown;
++    }
++}
++
++int SocketAddr::port() const {
++    switch (saddr_family_()) {
++    case AF_INET:
++        return core::ntoh16u((uint16_t)saddr_.addr4.sin_port);
++    case AF_INET6:
++        return core::ntoh16u((uint16_t)saddr_.addr6.sin6_port);
++    default:
++        return -1;
++    }
++}
++
++bool SocketAddr::multicast() const {
++    switch (saddr_family_()) {
++    case AF_INET:
++        return IN_MULTICAST(core::ntoh32u(saddr_.addr4.sin_addr.s_addr));
++    case AF_INET6:
++        return IN6_IS_ADDR_MULTICAST(&saddr_.addr6.sin6_addr);
++    default:
++        return false;
++    }
++}
++
++bool SocketAddr::get_host(char* buf, size_t bufsz) const {
++    switch (saddr_family_()) {
++    case AF_INET:
++        if (!inet_ntop(AF_INET, &saddr_.addr4.sin_addr, buf, (socklen_t)bufsz)) {
++            return false;
++        }
++        break;
++
++    case AF_INET6:
++        if (!inet_ntop(AF_INET6, &saddr_.addr6.sin6_addr, buf, (socklen_t)bufsz)) {
++            return false;
++        }
++        break;
++
++    default:
++        return false;
++    }
++
++    return true;
++}
++
++SocketAddr::operator const struct unspecified_bool*() const {
++    return (const unspecified_bool*)has_host_port();
++}
++
++bool SocketAddr::operator==(const SocketAddr& other) const {
++    if (saddr_family_() != other.saddr_family_()) {
++        return false;
++    }
++
++    switch (saddr_family_()) {
++    case AF_INET:
++        if (saddr_.addr4.sin_addr.s_addr != other.saddr_.addr4.sin_addr.s_addr) {
++            return false;
++        }
++        if (saddr_.addr4.sin_port != other.saddr_.addr4.sin_port) {
++            return false;
++        }
++        break;
++
++    case AF_INET6:
++        if (memcmp(saddr_.addr6.sin6_addr.s6_addr, other.saddr_.addr6.sin6_addr.s6_addr,
++                   sizeof(saddr_.addr6.sin6_addr.s6_addr))
++            != 0) {
++            return false;
++        }
++        if (saddr_.addr6.sin6_port != other.saddr_.addr6.sin6_port) {
++            return false;
++        }
++        break;
++
++    default:
++        break;
++    }
++
++    return true;
++}
++
++bool SocketAddr::operator!=(const SocketAddr& other) const {
++    return !(*this == other);
++}
++
++socklen_t SocketAddr::saddr_size_(ADDRESS_FAMILY family) {
++    switch (family) {
++    case AF_INET:
++        return sizeof(sockaddr_in);
++    case AF_INET6:
++        return sizeof(sockaddr_in6);
++    default:
++        return 0;
++    }
++}
++
++ADDRESS_FAMILY SocketAddr::saddr_family_() const {
++    return saddr_.addr4.sin_family;
++}
++
++} // namespace address
++} // namespace roc
++
+diff --git a/src/internal_modules/roc_address/target_windows/roc_address/socket_addr.h b/src/internal_modules/roc_address/target_windows/roc_address/socket_addr.h
+new file mode 100644
+index 0000000..608ed41
+--- /dev/null
++++ b/src/internal_modules/roc_address/target_windows/roc_address/socket_addr.h
+@@ -0,0 +1,102 @@
++/*
++ * Copyright (c) 2015 Roc Streaming authors
++ *
++ * This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
++ */
++
++//! @file roc_address/target_windows/roc_address/socket_addr.h
++//! @brief Socket address.
++
++#ifndef ROC_ADDRESS_SOCKET_ADDR_H_
++#define ROC_ADDRESS_SOCKET_ADDR_H_
++
++#include <winsock2.h>
++#include <ws2tcpip.h>
++
++#include "roc_address/addr_family.h"
++#include "roc_core/attributes.h"
++#include "roc_core/stddefs.h"
++
++namespace roc {
++namespace address {
++
++//! Socket address.
++class SocketAddr {
++public:
++    //! Construct empty address.
++    SocketAddr();
++
++    //! Clear address.
++    void clear();
++
++    //! Check whether host and port are set.
++    bool has_host_port() const;
++
++    //! Set host address.
++    ROC_ATTR_NODISCARD bool set_host_port(AddrFamily type, const char* host, int port);
++
++    //! Set host address, auto-detect family.
++    ROC_ATTR_NODISCARD bool set_host_port_auto(const char* host, int port);
++
++    //! Set address from sockaddr struct.
++    ROC_ATTR_NODISCARD bool set_host_port_saddr(const sockaddr* sa);
++
++    //! Get IP version (IPv4 or IPv6).
++    AddrFamily family() const;
++
++    //! Check whether this is multicast address.
++    bool multicast() const;
++
++    //! Get host IP address.
++    ROC_ATTR_NODISCARD bool get_host(char* buf, size_t bufsz) const;
++
++    //! Get address port.
++    int port() const;
++
++    //! Get sockaddr struct.
++    sockaddr* saddr();
++
++    //! Get sockaddr struct.
++    const sockaddr* saddr() const;
++
++    //! Get sockaddr struct length.
++    socklen_t slen() const;
++
++    //! Get maximum allowed sockaddr struct length.
++    socklen_t max_slen() const;
++
++    //! Convert to bool.
++    operator const struct unspecified_bool*() const;
++
++    //! Compare addresses.
++    bool operator==(const SocketAddr& other) const;
++
++    //! Compare addresses.
++    bool operator!=(const SocketAddr& other) const;
++
++    enum {
++        // An estimate maximum length of a string representation of an address.
++        MaxStrLen = 196
++    };
++
++private:
++    static socklen_t saddr_size_(ADDRESS_FAMILY family);
++
++    ADDRESS_FAMILY saddr_family_() const;
++
++    bool set_host_port_ipv4_(const char* ip, int port);
++    bool set_host_port_ipv6_(const char* ip, int port);
++
++    union {
++        sockaddr_in addr4;
++        sockaddr_in6 addr6;
++    } saddr_;
++};
++
++} // namespace address
++} // namespace roc
++
++#endif // ROC_ADDRESS_SOCKET_ADDR_H_
++
+diff --git a/src/internal_modules/roc_core/target_windows/roc_core/cond.cpp b/src/internal_modules/roc_core/target_windows/roc_core/cond.cpp
+new file mode 100644
+index 0000000..9807e9b
+--- /dev/null
++++ b/src/internal_modules/roc_core/target_windows/roc_core/cond.cpp
+@@ -0,0 +1,34 @@
++/*
++ * Copyright (c) 2026 Roc Streaming authors
++ *
++ * This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
++ */
++#include "roc_core/cond.h"
++namespace roc { namespace core {
++bool Cond::timed_wait(nanoseconds_t timeout) const {
++    roc_panic_if(timeout < 0);
++    const nanoseconds_t deadline = timestamp(ClockMonotonic) + timeout;
++    for (;;) {
++        nanoseconds_t left = deadline - timestamp(ClockMonotonic);
++        DWORD ms = left <= 0 ? 0 : DWORD(std::min<nanoseconds_t>((left + Millisecond - 1) / Millisecond, INFINITE - 1));
++        InterlockedExchange(&mutex_.owner_, 0);
++        BOOL ok = SleepConditionVariableSRW(&cond_, &mutex_.mutex_, ms, 0);
++        DWORD error = ok ? 0 : GetLastError();
++        InterlockedExchange(&mutex_.owner_, LONG(GetCurrentThreadId()));
++        if (ok) return true;
++        if (error != ERROR_TIMEOUT) roc_panic("cond: wait failed: %lu", error);
++        if (timestamp(ClockMonotonic) >= deadline) return false;
++    }
++}
++void Cond::wait() const {
++    InterlockedExchange(&mutex_.owner_, 0);
++    BOOL ok = SleepConditionVariableSRW(&cond_, &mutex_.mutex_, INFINITE, 0);
++    DWORD error = ok ? 0 : GetLastError();
++    InterlockedExchange(&mutex_.owner_, LONG(GetCurrentThreadId()));
++    if (!ok) roc_panic("cond: wait failed: %lu", error);
++}
++} }
++
++
+diff --git a/src/internal_modules/roc_core/target_windows/roc_core/cond.h b/src/internal_modules/roc_core/target_windows/roc_core/cond.h
+new file mode 100644
+index 0000000..b5e81c2
+--- /dev/null
++++ b/src/internal_modules/roc_core/target_windows/roc_core/cond.h
+@@ -0,0 +1,31 @@
++/*
++ * Copyright (c) 2026 Roc Streaming authors
++ *
++ * This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
++ */
++#ifndef ROC_CORE_COND_H_
++#define ROC_CORE_COND_H_
++#include "roc_core/mutex.h"
++#include "roc_core/time.h"
++#include "roc_core/atomic.h"
++#include "roc_core/cpu_instructions.h"
++namespace roc { namespace core {
++class Cond : public NonCopyable<> {
++public:
++    explicit Cond(const Mutex& mutex) : guard_(0), mutex_(mutex) { InitializeConditionVariable(&cond_); }
++    ~Cond() { while (guard_) cpu_relax(); }
++    ROC_ATTR_NODISCARD bool timed_wait(nanoseconds_t timeout) const;
++    void wait() const;
++    void signal() const { ++guard_; WakeConditionVariable(&cond_); --guard_; }
++    void broadcast() const { ++guard_; WakeAllConditionVariable(&cond_); --guard_; }
++private:
++    mutable CONDITION_VARIABLE cond_;
++    mutable Atomic<int> guard_;
++    const Mutex& mutex_;
++};
++} }
++#endif
++
++
+diff --git a/src/internal_modules/roc_core/target_windows/roc_core/console.cpp b/src/internal_modules/roc_core/target_windows/roc_core/console.cpp
+new file mode 100644
+index 0000000..a6c9216
+--- /dev/null
++++ b/src/internal_modules/roc_core/target_windows/roc_core/console.cpp
+@@ -0,0 +1,161 @@
++/*
++ * Copyright (c) 2019 Roc Streaming authors
++ *
++ * This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
++ */
++
++#include "roc_core/windows.h"
++#include <stdarg.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <io.h>
++
++#include "roc_core/atomic_ops.h"
++#include "roc_core/console.h"
++
++// ANSI Color Codes.
++#define COLOR_NONE ""
++#define COLOR_START "\033["
++#define COLOR_END "m"
++#define COLOR_RESET COLOR_START "0" COLOR_END
++#define COLOR_SEPARATOR ";"
++#define COLOR_BOLD "1"
++#define COLOR_BLACK "30"
++#define COLOR_RED "31"
++#define COLOR_GREEN "32"
++#define COLOR_YELLOW "33"
++#define COLOR_BLUE "34"
++#define COLOR_MAGENTA "35"
++#define COLOR_CYAN "36"
++#define COLOR_WHITE "37"
++
++namespace roc {
++namespace core {
++
++namespace {
++
++// Serializes console operations.
++SRWLOCK console_mutex = SRWLOCK_INIT;
++
++// -1 means unknown, 0 means no support, +1 means have support.
++int console_colors = -1;
++
++bool env_has_no_color() {
++    const char* no_color = getenv("NO_COLOR");
++    if (no_color) {
++        return strnlen(no_color, 16) > 0;
++    }
++    return false;
++}
++
++bool env_has_force_color() {
++    const char* force_color = getenv("FORCE_COLOR");
++    if (force_color) {
++        char* end;
++        long value = strtol(force_color, &end, 10);
++        if (*force_color != '\0' && *end == '\0') {
++            return value > 0;
++        }
++    }
++    return false;
++}
++
++bool term_supports_color() {
++    DWORD mode = 0;
++    HANDLE handle = GetStdHandle(STD_ERROR_HANDLE);
++    return GetConsoleMode(handle, &mode) && SetConsoleMode(handle, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
++}
++bool detect_color_support() {
++    if (env_has_no_color()) {
++        return false;
++    } else if (env_has_force_color()) {
++        return true;
++    }
++    return term_supports_color();
++}
++
++const char* color_code(Color color) {
++    switch (color) {
++    case Color_White:
++        return COLOR_START COLOR_BOLD COLOR_SEPARATOR COLOR_WHITE COLOR_END;
++    case Color_Gray:
++        return COLOR_START COLOR_SEPARATOR COLOR_WHITE COLOR_END;
++    case Color_Red:
++        return COLOR_START COLOR_BOLD COLOR_SEPARATOR COLOR_RED COLOR_END;
++    case Color_Green:
++        return COLOR_START COLOR_BOLD COLOR_SEPARATOR COLOR_GREEN COLOR_END;
++    case Color_Yellow:
++        return COLOR_START COLOR_BOLD COLOR_SEPARATOR COLOR_YELLOW COLOR_END;
++    case Color_Blue:
++        return COLOR_START COLOR_BOLD COLOR_SEPARATOR COLOR_BLUE COLOR_END;
++    case Color_Magenta:
++        return COLOR_START COLOR_BOLD COLOR_SEPARATOR COLOR_MAGENTA COLOR_END;
++    case Color_Cyan:
++        return COLOR_START COLOR_BOLD COLOR_SEPARATOR COLOR_CYAN COLOR_END;
++    default:
++        break;
++    }
++    return COLOR_NONE;
++}
++
++} // namespace
++
++bool console_supports_colors() {
++    int colors = AtomicOps::load_seq_cst(console_colors);
++
++    if (colors == -1) {
++        AcquireSRWLockExclusive(&console_mutex);
++
++        colors = detect_color_support() ? 1 : 0;
++        AtomicOps::store_seq_cst(console_colors, colors);
++
++        ReleaseSRWLockExclusive(&console_mutex);
++    }
++
++    return colors;
++}
++
++void console_println(const char* format, ...) {
++    AcquireSRWLockExclusive(&console_mutex);
++
++    va_list args;
++    va_start(args, format);
++    vfprintf(stderr, format, args);
++    va_end(args);
++
++    fprintf(stderr, "\n");
++    fflush(stderr);
++
++    ReleaseSRWLockExclusive(&console_mutex);
++}
++
++void console_println(Color color, const char* format, ...) {
++    const bool use_colors = (color != Color_None) && console_supports_colors();
++
++    AcquireSRWLockExclusive(&console_mutex);
++
++    if (use_colors) {
++        fprintf(stderr, "%s", color_code(color));
++    }
++
++    va_list args;
++    va_start(args, format);
++    vfprintf(stderr, format, args);
++    va_end(args);
++
++    if (use_colors) {
++        fprintf(stderr, "%s", COLOR_RESET);
++    }
++
++    fprintf(stderr, "\n");
++    fflush(stderr);
++
++    ReleaseSRWLockExclusive(&console_mutex);
++}
++
++} // namespace core
++} // namespace roc
++
+diff --git a/src/internal_modules/roc_core/target_windows/roc_core/console.h b/src/internal_modules/roc_core/target_windows/roc_core/console.h
+new file mode 100644
+index 0000000..8be627f
+--- /dev/null
++++ b/src/internal_modules/roc_core/target_windows/roc_core/console.h
+@@ -0,0 +1,45 @@
++/*
++ * Copyright (c) 2019 Roc Streaming authors
++ *
++ * This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
++ */
++
++//! @file roc_core/target_posix_pc/roc_core/console.h
++//! @brief Console functions.
++
++#ifndef ROC_CORE_CONSOLE_H_
++#define ROC_CORE_CONSOLE_H_
++
++#include "roc_core/attributes.h"
++
++namespace roc {
++namespace core {
++
++//! Color ID.
++enum Color {
++    Color_None,
++    Color_White,
++    Color_Gray,
++    Color_Red,
++    Color_Green,
++    Color_Yellow,
++    Color_Blue,
++    Color_Magenta,
++    Color_Cyan
++};
++
++//! Check if colors can be used.
++bool console_supports_colors();
++
++//! Print line.
++ROC_ATTR_PRINTF(1, 2) void console_println(const char* format, ...);
++
++//! Print line (with color).
++ROC_ATTR_PRINTF(2, 3) void console_println(Color color, const char* format, ...);
++
++} // namespace core
++} // namespace roc
++
++#endif // ROC_CORE_CONSOLE_H_
+diff --git a/src/internal_modules/roc_core/target_windows/roc_core/cpu_instructions.h b/src/internal_modules/roc_core/target_windows/roc_core/cpu_instructions.h
+new file mode 100644
+index 0000000..608fdc4
+--- /dev/null
++++ b/src/internal_modules/roc_core/target_windows/roc_core/cpu_instructions.h
+@@ -0,0 +1,54 @@
++/*
++ * Copyright (c) 2020 Roc Streaming authors
++ *
++ * This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
++ */
++
++//! @file roc_core/target_posix/roc_core/cpu_instructions.h
++//! @brief CPU-specific instructions.
++
++#ifndef ROC_CORE_CPU_INSTRUCTIONS_H_
++#define ROC_CORE_CPU_INSTRUCTIONS_H_
++
++namespace roc {
++namespace core {
++
++#ifdef __GNUC__
++
++#if defined(__i386__) || defined(__x86_64__)
++
++inline void cpu_relax() {
++    __asm__ __volatile__("pause" ::: "memory");
++}
++
++#elif defined(__aarch64__)
++
++inline void cpu_relax() {
++    __asm__ __volatile__("yield" ::: "memory");
++}
++
++#else // unknown arch
++
++inline void cpu_relax() {
++    __asm__ __volatile__("" ::: "memory");
++}
++
++#endif
++
++#else // !__GNUC__
++
++//! CPU pause instruction.
++//! @remarks
++//!  Doesn't include any memory barriers, so the caller is responsible to
++//!  insert them into the loop. Allowed to expand to nothing.
++inline void cpu_relax() {
++}
++
++#endif // __GNUC__
++
++} // namespace core
++} // namespace roc
++
++#endif // ROC_CORE_CPU_INSTRUCTIONS_H_
+diff --git a/src/internal_modules/roc_core/target_windows/roc_core/cpu_traits.h b/src/internal_modules/roc_core/target_windows/roc_core/cpu_traits.h
+new file mode 100644
+index 0000000..0fe50d7
+--- /dev/null
++++ b/src/internal_modules/roc_core/target_windows/roc_core/cpu_traits.h
+@@ -0,0 +1,186 @@
++/*
++ * Copyright (c) 2020 Roc Streaming authors
++ *
++ * This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
++ */
++
++//! @file roc_core/target_posix/roc_core/cpu_traits.h
++//! @brief CPU traits.
++
++#ifndef ROC_CORE_CPU_TRAITS_H_
++#define ROC_CORE_CPU_TRAITS_H_
++
++// On some environments, some standard macros like UINT_MAX or SIZE_MAX are
++// defined to expressions that can't be evaluated at preprocessing time and a
++// simple check like SIZE_MAX == 0xffffffffffffffff may not always work. Thus,
++// we do our best and check many different standard and non-standard macros.
++//
++// We avoid comparisons with other macros like SIZE_MAX == UINT_MAX, since if
++// both are defined to something that can not be evaluated by preprocessor,
++// both will be assumed to be zeros and the check may incorrectly pass.
++
++#include "roc_core/stddefs.h"
++
++//! Value of ROC_CPU_ENDIAN indicating big-endian CPU.
++#define ROC_CPU_BE 1
++
++//! Value of ROC_CPU_ENDIAN indicating little-endian CPU.
++#define ROC_CPU_LE 2
++
++// Detect CPU endianess.
++
++#ifndef ROC_CPU_ENDIAN
++#if defined(__BYTE_ORDER__) && defined(__ORDER_BIG_ENDIAN__)                             \
++    && defined(__ORDER_LITTLE_ENDIAN__)
++#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
++#define ROC_CPU_ENDIAN ROC_CPU_BE
++#elif __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
++#define ROC_CPU_ENDIAN ROC_CPU_LE
++#endif
++#endif
++#endif
++
++#ifndef ROC_CPU_ENDIAN
++#if defined(__BYTE_ORDER) && defined(__BIG_ENDIAN) && defined(__LITTLE_ENDIAN)
++#if __BYTE_ORDER == __BIG_ENDIAN
++#define ROC_CPU_ENDIAN ROC_CPU_BE
++#elif __BYTE_ORDER == __LITTLE_ENDIAN
++#define ROC_CPU_ENDIAN ROC_CPU_LE
++#endif
++#endif
++#endif
++
++#ifndef ROC_CPU_ENDIAN
++#if defined(_BYTE_ORDER) && defined(_BIG_ENDIAN) && defined(_LITTLE_ENDIAN)
++#if _BYTE_ORDER == _BIG_ENDIAN
++#define ROC_CPU_ENDIAN ROC_CPU_BE
++#elif _BYTE_ORDER == _LITTLE_ENDIAN
++#define ROC_CPU_ENDIAN ROC_CPU_LE
++#endif
++#endif
++#endif
++
++#ifndef ROC_CPU_ENDIAN
++#if defined(BYTE_ORDER) && defined(BIG_ENDIAN) && defined(LITTLE_ENDIAN)
++#if BYTE_ORDER == BIG_ENDIAN
++#define ROC_CPU_ENDIAN ROC_CPU_BE
++#elif BYTE_ORDER == LITTLE_ENDIAN
++#define ROC_CPU_ENDIAN ROC_CPU_LE
++#endif
++#endif
++#endif
++
++#ifndef ROC_CPU_ENDIAN
++#if defined(__BIG_ENDIAN__)
++#if __BIG_ENDIAN__ == 1
++#define ROC_CPU_ENDIAN ROC_CPU_BE
++#endif
++#endif
++#endif
++
++#ifndef ROC_CPU_ENDIAN
++#if defined(__LITTLE_ENDIAN__)
++#if __LITTLE_ENDIAN__ == 1
++#define ROC_CPU_ENDIAN ROC_CPU_LE
++#endif
++#endif
++#endif
++
++#ifndef ROC_CPU_ENDIAN
++#if !defined(_BYTE_ORDER) && defined(_BIG_ENDIAN)
++#if _BIG_ENDIAN == 1
++#define ROC_CPU_ENDIAN ROC_CPU_BE
++#endif
++#endif
++#endif
++
++#ifndef ROC_CPU_ENDIAN
++#if !defined(_BYTE_ORDER) && defined(_LITTLE_ENDIAN)
++#if _LITTLE_ENDIAN == 1
++#define ROC_CPU_ENDIAN ROC_CPU_LE
++#endif
++#endif
++#endif
++
++#ifndef ROC_CPU_ENDIAN
++#if defined(__ARMEB__) || defined(__THUMBEB__) || defined(__AARCH64EB__)                 \
++    || defined(_MIBSEB) || defined(__MIBSEB) || defined(__MIBSEB__) || defined(_M_PPC)
++#define ROC_CPU_ENDIAN ROC_CPU_BE
++#endif
++#endif
++
++#ifndef ROC_CPU_ENDIAN
++#if defined(__ARMEL__) || defined(__THUMBEL__) || defined(__AARCH64EL__)                 \
++    || defined(_MIPSEL) || defined(__MIPSEL) || defined(__MIPSEL__) || defined(_M_IX86)  \
++    || defined(_M_X64) || defined(_M_AMD64) || defined(_M_IA64) || defined(_M_ARM)       \
++    || defined(_X86_) || defined(__x86_64__) || defined(__i386__) || defined(__i486__)   \
++    || defined(__i586__) || defined(__i686__)
++#define ROC_CPU_ENDIAN ROC_CPU_LE
++#endif
++#endif
++
++// Detect CPU bitness.
++
++#ifndef ROC_CPU_BITS
++#ifdef UINTPTR_MAX
++#if UINTPTR_MAX == 0xffffffffffffffff
++#define ROC_CPU_BITS 64
++#endif
++#endif
++#endif
++
++#ifndef ROC_CPU_BITS
++#ifdef __UINTPTR_MAX__
++#if __UINTPTR_MAX__ == 0xffffffffffffffff
++#define ROC_CPU_BITS 64
++#endif
++#endif
++#endif
++
++#ifndef ROC_CPU_BITS
++#ifdef SIZE_MAX
++#if SIZE_MAX == 0xffffffffffffffff
++#define ROC_CPU_BITS 64
++#endif
++#endif
++#endif
++
++#ifndef ROC_CPU_BITS
++#ifdef __SIZE_MAX__
++#if __SIZE_MAX__ == 0xffffffffffffffff
++#define ROC_CPU_BITS 64
++#endif
++#endif
++#endif
++
++#ifndef ROC_CPU_BITS
++#ifdef __SIZEOF_POINTER__
++#if __SIZEOF_POINTER__ == 8
++#define ROC_CPU_BITS 64
++#endif
++#endif
++#endif
++
++#ifndef ROC_CPU_BITS
++#ifdef __SIZEOF_SIZE_T__
++#if __SIZEOF_SIZE_T__ == 8
++#define ROC_CPU_BITS 64
++#endif
++#endif
++#endif
++
++#ifndef ROC_CPU_BITS
++#ifdef __LP64__
++#if __LP64__
++#define ROC_CPU_BITS 64
++#endif
++#endif
++#endif
++
++#ifndef ROC_CPU_BITS
++#define ROC_CPU_BITS 32
++#endif
++
++#endif // ROC_CORE_CPU_TRAITS_H_
+diff --git a/src/internal_modules/roc_core/target_windows/roc_core/crash_handler.cpp b/src/internal_modules/roc_core/target_windows/roc_core/crash_handler.cpp
+new file mode 100644
+index 0000000..a698e58
+--- /dev/null
++++ b/src/internal_modules/roc_core/target_windows/roc_core/crash_handler.cpp
+@@ -0,0 +1,15 @@
++/*
++ * Copyright (c) 2026 Roc Streaming authors
++ *
++ * This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
++ */
++#include "roc_core/crash_handler.h"
++#include "roc_core/die.h"
++namespace roc { namespace core {
++namespace { LONG WINAPI handle_exception(EXCEPTION_POINTERS*) { die_gracefully("unhandled Windows exception", true); } }
++CrashHandler::CrashHandler() : previous_(SetUnhandledExceptionFilter(handle_exception)) {}
++CrashHandler::~CrashHandler() { SetUnhandledExceptionFilter(previous_); }
++} }
++
+diff --git a/src/internal_modules/roc_core/target_windows/roc_core/crash_handler.h b/src/internal_modules/roc_core/target_windows/roc_core/crash_handler.h
+new file mode 100644
+index 0000000..39dbae7
+--- /dev/null
++++ b/src/internal_modules/roc_core/target_windows/roc_core/crash_handler.h
+@@ -0,0 +1,22 @@
++/*
++ * Copyright (c) 2026 Roc Streaming authors
++ *
++ * This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
++ */
++#ifndef ROC_CORE_CRASH_HANDLER_H_
++#define ROC_CORE_CRASH_HANDLER_H_
++#include "roc_core/windows.h"
++#include "roc_core/noncopyable.h"
++namespace roc { namespace core {
++class CrashHandler : public NonCopyable<> {
++public:
++    CrashHandler();
++    ~CrashHandler();
++private:
++    LPTOP_LEVEL_EXCEPTION_FILTER previous_;
++};
++} }
++#endif
++
+diff --git a/src/internal_modules/roc_core/target_windows/roc_core/die.cpp b/src/internal_modules/roc_core/target_windows/roc_core/die.cpp
+new file mode 100644
+index 0000000..221235d
+--- /dev/null
++++ b/src/internal_modules/roc_core/target_windows/roc_core/die.cpp
+@@ -0,0 +1,23 @@
++/*
++ * Copyright (c) 2026 Roc Streaming authors
++ *
++ * This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
++ */
++#include "roc_core/windows.h"
++#include "roc_core/die.h"
++#include "roc_core/backtrace.h"
++#include "roc_core/stddefs.h"
++namespace roc { namespace core {
++void die_fast(int code) { TerminateProcess(GetCurrentProcess(), UINT(code)); abort(); }
++void die_gracefully(const char* message, bool full_backtrace) {
++    static volatile LONG dying = 0;
++    if (InterlockedCompareExchange(&dying, 1, 0) == 0) {
++        fprintf(stderr, "\nERROR: %s\n\n", message); fflush(stderr);
++        if (full_backtrace) print_backtrace_full(); else print_backtrace_safe();
++    }
++    die_fast(1);
++}
++} }
++
+diff --git a/src/internal_modules/roc_core/target_windows/roc_core/die.h b/src/internal_modules/roc_core/target_windows/roc_core/die.h
+new file mode 100644
+index 0000000..a374dc1
+--- /dev/null
++++ b/src/internal_modules/roc_core/target_windows/roc_core/die.h
+@@ -0,0 +1,33 @@
++/*
++ * Copyright (c) 2017 Roc Streaming authors
++ *
++ * This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
++ */
++
++//! @file roc_core/target_posix/roc_core/die.h
++//! @brief Program termination.
++
++#ifndef ROC_CORE_DIE_H_
++#define ROC_CORE_DIE_H_
++
++#include "roc_core/attributes.h"
++
++namespace roc {
++namespace core {
++
++//! Terminate program.
++//! @remarks
++//!  Terminates immediately without calling destructors and exit handlers.
++ROC_ATTR_NORETURN void die_fast(int code);
++
++//! Terminate program with error message and backtrace.
++//! @remarks
++//!  Prints error message, backtraces, and terminates program with error.
++ROC_ATTR_NORETURN void die_gracefully(const char* message, bool full_backtrace);
++
++} // namespace core
++} // namespace roc
++
++#endif // ROC_CORE_DIE_H_
+diff --git a/src/internal_modules/roc_core/target_windows/roc_core/errno_to_str.cpp b/src/internal_modules/roc_core/target_windows/roc_core/errno_to_str.cpp
+new file mode 100644
+index 0000000..1c7e0e2
+--- /dev/null
++++ b/src/internal_modules/roc_core/target_windows/roc_core/errno_to_str.cpp
+@@ -0,0 +1,19 @@
++/*
++ * Copyright (c) 2026 Roc Streaming authors
++ *
++ * This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
++ */
++#include <errno.h>
++#include <stdio.h>
++#include <string.h>
++#include "roc_core/errno_to_str.h"
++namespace roc { namespace core {
++errno_to_str::errno_to_str() { format_(errno); }
++errno_to_str::errno_to_str(int err) { format_(err); }
++void errno_to_str::format_(int err) {
++    if (strerror_s(buffer_, sizeof(buffer_), err)) snprintf(buffer_, sizeof(buffer_), "errno %d", err);
++}
++} }
++
+diff --git a/src/internal_modules/roc_core/target_windows/roc_core/errno_to_str.h b/src/internal_modules/roc_core/target_windows/roc_core/errno_to_str.h
+new file mode 100644
+index 0000000..444e4b8
+--- /dev/null
++++ b/src/internal_modules/roc_core/target_windows/roc_core/errno_to_str.h
+@@ -0,0 +1,45 @@
++/*
++ * Copyright (c) 2015 Roc Streaming authors
++ *
++ * This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
++ */
++
++//! @file roc_core/target_posix/roc_core/errno_to_str.h
++//! @brief Convert errno to string.
++
++#ifndef ROC_CORE_ERRNO_TO_STR_H_
++#define ROC_CORE_ERRNO_TO_STR_H_
++
++#include "roc_core/noncopyable.h"
++
++namespace roc {
++namespace core {
++
++//! Convert errno to string.
++//! @remarks
++//!  Uses strerror_r(), which is thread-safe unlike strerror().
++class errno_to_str : public NonCopyable<> {
++public:
++    //! Construct from errno.
++    errno_to_str();
++
++    //! Construct from custom error code.
++    explicit errno_to_str(int err);
++
++    //! Get error message.
++    const char* c_str() const {
++        return buffer_;
++    }
++
++private:
++    void format_(int err);
++
++    char buffer_[96];
++};
++
++} // namespace core
++} // namespace roc
++
++#endif // ROC_CORE_ERRNO_TO_STR_H_
+diff --git a/src/internal_modules/roc_core/target_windows/roc_core/mutex.h b/src/internal_modules/roc_core/target_windows/roc_core/mutex.h
+new file mode 100644
+index 0000000..80ae3d5
+--- /dev/null
++++ b/src/internal_modules/roc_core/target_windows/roc_core/mutex.h
+@@ -0,0 +1,46 @@
++/*
++ * Copyright (c) 2026 Roc Streaming authors
++ *
++ * This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
++ */
++#ifndef ROC_CORE_MUTEX_H_
++#define ROC_CORE_MUTEX_H_
++#include "roc_core/windows.h"
++#include "roc_core/noncopyable.h"
++#include "roc_core/scoped_lock.h"
++#include "roc_core/attributes.h"
++#include "roc_core/panic.h"
++#include "roc_core/atomic.h"
++#include "roc_core/cpu_instructions.h"
++namespace roc { namespace core {
++class Cond;
++class Mutex : public NonCopyable<> {
++public:
++    typedef ScopedLock<Mutex> Lock;
++    Mutex() : owner_(0), guard_(0) { InitializeSRWLock(&mutex_); }
++    ~Mutex() { while (guard_) cpu_relax(); roc_panic_if(InterlockedCompareExchange(&owner_, 0, 0) != 0); }
++    ROC_ATTR_NODISCARD bool try_lock() const {
++        if (!TryAcquireSRWLockExclusive(&mutex_)) return false;
++        InterlockedExchange(&owner_, LONG(GetCurrentThreadId())); return true;
++    }
++    void lock() const {
++        roc_panic_if(DWORD(InterlockedCompareExchange(&owner_, 0, 0)) == GetCurrentThreadId());
++        AcquireSRWLockExclusive(&mutex_); InterlockedExchange(&owner_, LONG(GetCurrentThreadId()));
++    }
++    void unlock() const {
++        roc_panic_if(DWORD(InterlockedCompareExchange(&owner_, 0, 0)) != GetCurrentThreadId());
++        ++guard_; InterlockedExchange(&owner_, 0); ReleaseSRWLockExclusive(&mutex_); --guard_;
++    }
++private:
++    friend class Cond;
++    mutable SRWLOCK mutex_;
++    mutable volatile LONG owner_;
++    mutable Atomic<int> guard_;
++};
++} }
++#endif
++
++
++
+diff --git a/src/internal_modules/roc_core/target_windows/roc_core/semaphore.cpp b/src/internal_modules/roc_core/target_windows/roc_core/semaphore.cpp
+new file mode 100644
+index 0000000..5a6c05b
+--- /dev/null
++++ b/src/internal_modules/roc_core/target_windows/roc_core/semaphore.cpp
+@@ -0,0 +1,33 @@
++/*
++ * Copyright (c) 2026 Roc Streaming authors
++ *
++ * This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
++ */
++#include "roc_core/semaphore.h"
++#include "roc_core/panic.h"
++#include "roc_core/cpu_instructions.h"
++namespace roc { namespace core {
++Semaphore::Semaphore(unsigned counter) : guard_(0) {
++    roc_panic_if(counter > LONG_MAX);
++    sem_ = CreateSemaphoreW(NULL, LONG(counter), LONG_MAX, NULL);
++    if (!sem_) roc_panic("semaphore: creation failed: %lu", GetLastError());
++}
++Semaphore::~Semaphore() { while (guard_) cpu_relax(); if (!CloseHandle(sem_)) roc_panic("semaphore: close failed: %lu", GetLastError()); }
++bool Semaphore::timed_wait(nanoseconds_t deadline) {
++    roc_panic_if(deadline < 0);
++    for (;;) {
++        nanoseconds_t left = deadline - timestamp(ClockUnix);
++        DWORD ms = left <= 0 ? 0 : DWORD(std::min<nanoseconds_t>((left + Millisecond - 1) / Millisecond, INFINITE - 1));
++        DWORD result = WaitForSingleObject(sem_, ms);
++        if (result == WAIT_OBJECT_0) return true;
++        if (result != WAIT_TIMEOUT) roc_panic("semaphore: wait failed: %lu", GetLastError());
++        if (timestamp(ClockUnix) >= deadline) return false;
++    }
++}
++void Semaphore::wait() { if (WaitForSingleObject(sem_, INFINITE) != WAIT_OBJECT_0) roc_panic("semaphore: wait failed: %lu", GetLastError()); }
++void Semaphore::post() { ++guard_; if (!ReleaseSemaphore(sem_, 1, NULL)) roc_panic("semaphore: post failed: %lu", GetLastError()); --guard_; }
++} }
++
++
+diff --git a/src/internal_modules/roc_core/target_windows/roc_core/semaphore.h b/src/internal_modules/roc_core/target_windows/roc_core/semaphore.h
+new file mode 100644
+index 0000000..160181e
+--- /dev/null
++++ b/src/internal_modules/roc_core/target_windows/roc_core/semaphore.h
+@@ -0,0 +1,30 @@
++/*
++ * Copyright (c) 2026 Roc Streaming authors
++ *
++ * This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
++ */
++#ifndef ROC_CORE_SEMAPHORE_H_
++#define ROC_CORE_SEMAPHORE_H_
++#include "roc_core/windows.h"
++#include "roc_core/noncopyable.h"
++#include "roc_core/attributes.h"
++#include "roc_core/time.h"
++#include "roc_core/atomic.h"
++namespace roc { namespace core {
++class Semaphore : public NonCopyable<> {
++public:
++    explicit Semaphore(unsigned counter = 0);
++    ~Semaphore();
++    ROC_ATTR_NODISCARD bool timed_wait(nanoseconds_t deadline);
++    void wait();
++    void post();
++private:
++    HANDLE sem_;
++    Atomic<int> guard_;
++};
++} }
++#endif
++
++
+diff --git a/src/internal_modules/roc_core/target_windows/roc_core/singleton.h b/src/internal_modules/roc_core/target_windows/roc_core/singleton.h
+new file mode 100644
+index 0000000..56cb36d
+--- /dev/null
++++ b/src/internal_modules/roc_core/target_windows/roc_core/singleton.h
+@@ -0,0 +1,34 @@
++/*
++ * Copyright (c) 2026 Roc Streaming authors
++ *
++ * This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
++ */
++#ifndef ROC_CORE_SINGLETON_H_
++#define ROC_CORE_SINGLETON_H_
++#include "roc_core/windows.h"
++#include "roc_core/aligned_storage.h"
++#include "roc_core/noncopyable.h"
++#include "roc_core/panic.h"
++namespace roc { namespace core {
++template<class T> class Singleton : public NonCopyable<> {
++public:
++    static T& instance() {
++        if (!InitOnceExecuteOnce(&once_, create_, NULL, NULL)) roc_panic("singleton: initialization failed");
++        return *instance_;
++    }
++private:
++    static BOOL CALLBACK create_(PINIT_ONCE, PVOID, PVOID*) {
++        instance_ = new (storage_.memory()) T; return TRUE;
++    }
++    static INIT_ONCE once_;
++    static AlignedStorage<sizeof(T)> storage_;
++    static T* instance_;
++};
++template<class T> INIT_ONCE Singleton<T>::once_ = INIT_ONCE_STATIC_INIT;
++template<class T> AlignedStorage<sizeof(T)> Singleton<T>::storage_;
++template<class T> T* Singleton<T>::instance_;
++} }
++#endif
++
+diff --git a/src/internal_modules/roc_core/target_windows/roc_core/stddefs.h b/src/internal_modules/roc_core/target_windows/roc_core/stddefs.h
+new file mode 100644
+index 0000000..543197a
+--- /dev/null
++++ b/src/internal_modules/roc_core/target_windows/roc_core/stddefs.h
+@@ -0,0 +1,31 @@
++/*
++ * Copyright (c) 2015 Roc Streaming authors
++ *
++ * This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
++ */
++
++//! @file roc_core/target_posix/roc_core/stddefs.h
++//! @brief Commonly used types and functions.
++
++#ifndef ROC_CORE_STDDEFS_H_
++#define ROC_CORE_STDDEFS_H_
++
++#include <algorithm>
++#include <cmath>
++#include <ctime>
++#include <new>
++
++#include <ctype.h>
++#include <inttypes.h>
++#include <limits.h>
++#include <stdarg.h>
++#include <stddef.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/types.h>
++
++#endif // ROC_CORE_STDDEFS_H_
+diff --git a/src/internal_modules/roc_core/target_windows/roc_core/temp_file.cpp b/src/internal_modules/roc_core/target_windows/roc_core/temp_file.cpp
+new file mode 100644
+index 0000000..d3fa3e1
+--- /dev/null
++++ b/src/internal_modules/roc_core/target_windows/roc_core/temp_file.cpp
+@@ -0,0 +1,34 @@
++/*
++ * Copyright (c) 2026 Roc Streaming authors
++ *
++ * This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
++ */
++#include "roc_core/windows.h"
++#include "roc_core/temp_file.h"
++#include "roc_core/panic.h"
++namespace roc { namespace core {
++TempFile::TempFile(const char* name) {
++    roc_panic_if(!name || !*name || strchr(name, '/') || strchr(name, '\\'));
++    char temp[MAX_PATH];
++    DWORD length = GetTempPathA(sizeof(temp), temp);
++    if (!length || length >= sizeof(temp)) roc_panic("temp_file: GetTempPath failed");
++    for (unsigned attempt = 0;; ++attempt) {
++        if (snprintf(dir_, sizeof(dir_), "%sroc-%lu-%llu-%u", temp, GetCurrentProcessId(), (unsigned long long)GetTickCount64(), attempt) >= int(sizeof(dir_))) roc_panic("temp_file: path too long");
++        if (CreateDirectoryA(dir_, NULL)) break;
++        if (GetLastError() != ERROR_ALREADY_EXISTS) roc_panic("temp_file: directory creation failed: %lu", GetLastError());
++    }
++    if (snprintf(file_, sizeof(file_), "%s\\%s", dir_, name) >= int(sizeof(file_))) roc_panic("temp_file: path too long");
++    HANDLE file = CreateFileA(file_, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
++    if (file == INVALID_HANDLE_VALUE) roc_panic("temp_file: file creation failed: %lu", GetLastError());
++    if (!CloseHandle(file)) roc_panic("temp_file: close failed");
++}
++TempFile::~TempFile() {
++    if (!DeleteFileA(file_) && GetLastError() != ERROR_FILE_NOT_FOUND) roc_panic("temp_file: delete failed: %lu", GetLastError());
++    if (!RemoveDirectoryA(dir_)) roc_panic("temp_file: directory removal failed: %lu", GetLastError());
++}
++const char* TempFile::path() const { return file_; }
++} }
++
++
+diff --git a/src/internal_modules/roc_core/target_windows/roc_core/temp_file.h b/src/internal_modules/roc_core/target_windows/roc_core/temp_file.h
+new file mode 100644
+index 0000000..4693cbb
+--- /dev/null
++++ b/src/internal_modules/roc_core/target_windows/roc_core/temp_file.h
+@@ -0,0 +1,45 @@
++/*
++ * Copyright (c) 2015 Roc Streaming authors
++ *
++ * This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
++ */
++
++//! @file roc_core/target_posix/roc_core/temp_file.h
++//! @brief Filesystem functions.
++
++#ifndef ROC_CORE_TEMP_FILE_H_
++#define ROC_CORE_TEMP_FILE_H_
++
++#include "roc_core/noncopyable.h"
++#include "roc_core/stddefs.h"
++
++namespace roc {
++namespace core {
++
++//! Temporary file.
++//! @remarks
++//!  A temporary file is created in constructor and removed in destructor.
++class TempFile : public core::NonCopyable<> {
++public:
++    //! Create temporary file.
++    //! @remarks
++    //!  Creates a temporary directory and a file with given @p name inside it.
++    //!  Both will be removed in destructor.
++    TempFile(const char* name);
++
++    ~TempFile();
++
++    //! Get file path.
++    const char* path() const;
++
++private:
++    char dir_[1024];
++    char file_[1024];
++};
++
++} // namespace core
++} // namespace roc
++
++#endif // ROC_CORE_TEMP_FILE_H_
+diff --git a/src/internal_modules/roc_core/target_windows/roc_core/thread.cpp b/src/internal_modules/roc_core/target_windows/roc_core/thread.cpp
+new file mode 100644
+index 0000000..d312d6b
+--- /dev/null
++++ b/src/internal_modules/roc_core/target_windows/roc_core/thread.cpp
+@@ -0,0 +1,40 @@
++/*
++ * Copyright (c) 2026 Roc Streaming authors
++ *
++ * This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
++ */
++#include <process.h>
++#include "roc_core/thread.h"
++#include "roc_core/log.h"
++#include "roc_core/panic.h"
++namespace roc { namespace core {
++uint64_t Thread::get_pid() { return GetCurrentProcessId(); }
++uint64_t Thread::get_tid() { return GetCurrentThreadId(); }
++bool Thread::enable_realtime() {
++    if (!SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL)) {
++        roc_log(LogError, "thread: SetThreadPriority failed: %lu", GetLastError()); return false;
++    }
++    return true;
++}
++Thread::Thread() : thread_(NULL), started_(0), joinable_(0) {}
++Thread::~Thread() { roc_panic_if(is_joinable()); }
++bool Thread::is_joinable() const { return joinable_; }
++bool Thread::start() {
++    Mutex::Lock lock(mutex_);
++    if (started_) { roc_log(LogError, "thread: can't start thread more than once"); return false; }
++    thread_ = reinterpret_cast<HANDLE>(_beginthreadex(NULL, 0, &Thread::thread_runner_, this, 0, NULL));
++    if (!thread_) { roc_log(LogError, "thread: _beginthreadex failed"); return false; }
++    started_ = 1; joinable_ = 1; return true;
++}
++void Thread::join() {
++    Mutex::Lock lock(mutex_);
++    if (!joinable_) return;
++    if (WaitForSingleObject(thread_, INFINITE) != WAIT_OBJECT_0) roc_panic("thread: join failed: %lu", GetLastError());
++    if (!CloseHandle(thread_)) roc_panic("thread: CloseHandle failed: %lu", GetLastError());
++    thread_ = NULL; joinable_ = 0;
++}
++unsigned __stdcall Thread::thread_runner_(void* ptr) { static_cast<Thread*>(ptr)->run(); return 0; }
++} }
++
+diff --git a/src/internal_modules/roc_core/target_windows/roc_core/thread.h b/src/internal_modules/roc_core/target_windows/roc_core/thread.h
+new file mode 100644
+index 0000000..82769c0
+--- /dev/null
++++ b/src/internal_modules/roc_core/target_windows/roc_core/thread.h
+@@ -0,0 +1,76 @@
++/*
++ * Copyright (c) 2015 Roc Streaming authors
++ *
++ * This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
++ */
++
++//! @file roc_core/target_posix/roc_core/thread.h
++//! @brief Thread.
++
++#ifndef ROC_CORE_THREAD_H_
++#define ROC_CORE_THREAD_H_
++
++#include "roc_core/windows.h"
++
++#include "roc_core/atomic.h"
++#include "roc_core/attributes.h"
++#include "roc_core/mutex.h"
++#include "roc_core/noncopyable.h"
++#include "roc_core/stddefs.h"
++
++namespace roc {
++namespace core {
++
++//! Base class for thread objects.
++class Thread : public NonCopyable<Thread> {
++public:
++    //! Get numeric identifier of current process.
++    static uint64_t get_pid();
++
++    //! Get numeric identifier of current thread.
++    static uint64_t get_tid();
++
++    //! Raise current thread priority to realtime.
++    ROC_ATTR_NODISCARD static bool enable_realtime();
++
++    //! Check if thread was started and can be joined.
++    //! @returns
++    //!  true if start() was called and join() was not called yet.
++    bool is_joinable() const;
++
++    //! Start thread.
++    //! @remarks
++    //!  Executes run() in new thread.
++    ROC_ATTR_NODISCARD bool start();
++
++    //! Join thread.
++    //! @remarks
++    //!  Blocks until run() returns and thread terminates.
++    void join();
++
++protected:
++    virtual ~Thread();
++
++    Thread();
++
++    //! Method to be executed in thread.
++    virtual void run() = 0;
++
++private:
++    static unsigned __stdcall thread_runner_(void* ptr);
++
++    HANDLE thread_;
++
++    int started_;
++    Atomic<int> joinable_;
++
++    Mutex mutex_;
++};
++
++} // namespace core
++} // namespace roc
++
++#endif // ROC_CORE_THREAD_H_
++
+diff --git a/src/internal_modules/roc_core/target_windows/roc_core/time.cpp b/src/internal_modules/roc_core/target_windows/roc_core/time.cpp
+new file mode 100644
+index 0000000..3f886f1
+--- /dev/null
++++ b/src/internal_modules/roc_core/target_windows/roc_core/time.cpp
+@@ -0,0 +1,46 @@
++/*
++ * Copyright (c) 2026 Roc Streaming authors
++ *
++ * This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
++ */
++#include "roc_core/windows.h"
++#include "roc_core/time.h"
++#include "roc_core/panic.h"
++namespace roc { namespace core {
++nanoseconds_t timestamp(clock_t clock) {
++    if (clock == ClockMonotonic) {
++        LARGE_INTEGER ticks, frequency;
++        if (!QueryPerformanceCounter(&ticks) || !QueryPerformanceFrequency(&frequency)) roc_panic("time: performance counter failed");
++        return (ticks.QuadPart / frequency.QuadPart) * Second + (ticks.QuadPart % frequency.QuadPart) * Second / frequency.QuadPart;
++    }
++    FILETIME ft; GetSystemTimePreciseAsFileTime(&ft);
++    ULARGE_INTEGER value; value.LowPart = ft.dwLowDateTime; value.HighPart = ft.dwHighDateTime;
++    return nanoseconds_t(value.QuadPart - 116444736000000000ULL) * 100;
++}
++void sleep_for(clock_t, nanoseconds_t ns) {
++    if (ns <= 0) return;
++    HANDLE timer = CreateWaitableTimerExW(NULL, NULL, 0x00000002, TIMER_ALL_ACCESS);
++    if (!timer) roc_panic("time: high resolution waitable timer creation failed: %lu", GetLastError());
++    LARGE_INTEGER due; due.QuadPart = -(ns / 100 + (ns % 100 != 0));
++    if (!SetWaitableTimer(timer, &due, 0, NULL, NULL, FALSE)) roc_panic("time: timer setup failed: %lu", GetLastError());
++    if (WaitForSingleObject(timer, INFINITE) != WAIT_OBJECT_0) roc_panic("time: timer wait failed: %lu", GetLastError());
++    if (!CloseHandle(timer)) roc_panic("time: timer close failed: %lu", GetLastError());
++}
++void sleep_until(clock_t clock, nanoseconds_t ns) {
++    nanoseconds_t left = ns - timestamp(clock);
++    while (left > 0) { sleep_for(clock, left); left = ns - timestamp(clock); }
++}
++std::tm nanoseconds_2_tm(nanoseconds_t timestamp) {
++    time_t seconds = time_t(timestamp / Second); std::tm result;
++    if (localtime_s(&result, &seconds)) roc_panic("time: localtime_s failed");
++    return result;
++}
++nanoseconds_t tm_2_nanoseconds(std::tm tm) {
++    time_t result = mktime(&tm);
++    if (result == (time_t)-1) roc_panic("time: mktime failed");
++    return nanoseconds_t(result) * Second;
++}
++} }
++
+diff --git a/src/internal_modules/roc_core/target_windows/roc_core/windows.h b/src/internal_modules/roc_core/target_windows/roc_core/windows.h
+new file mode 100644
+index 0000000..bb2608a
+--- /dev/null
++++ b/src/internal_modules/roc_core/target_windows/roc_core/windows.h
+@@ -0,0 +1,18 @@
++/*
++ * Copyright (c) 2026 Roc Streaming authors
++ *
++ * This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
++ */
++#ifndef ROC_CORE_WINDOWS_H_
++#define ROC_CORE_WINDOWS_H_
++#ifndef WIN32_LEAN_AND_MEAN
++#define WIN32_LEAN_AND_MEAN
++#endif
++#ifndef NOMINMAX
++#define NOMINMAX
++#endif
++#include <windows.h>
++#endif
++
+diff --git a/src/internal_modules/roc_fec/composer.h b/src/internal_modules/roc_fec/composer.h
+index 918950e..41f1c87 100644
+--- a/src/internal_modules/roc_fec/composer.h
++++ b/src/internal_modules/roc_fec/composer.h
+@@ -17,6 +17,7 @@
+ #include "roc_core/noncopyable.h"
+ #include "roc_fec/headers.h"
+ #include "roc_packet/icomposer.h"
++#include <stdint.h>
+ 
+ namespace roc {
+ namespace fec {
+@@ -36,7 +37,7 @@ public:
+     //! Adjust buffer to align payload.
+     virtual bool
+     align(core::Slice<uint8_t>& buffer, size_t header_size, size_t payload_alignment) {
+-        if ((unsigned long)buffer.data() % payload_alignment != 0) {
++        if ((uintptr_t)buffer.data() % payload_alignment != 0) {
+             roc_panic("fec composer: unexpected non-aligned buffer");
+         }
+ 
+diff --git a/src/internal_modules/roc_netio/target_libuv/roc_netio/tcp_connection_port.cpp b/src/internal_modules/roc_netio/target_libuv/roc_netio/tcp_connection_port.cpp
+index 9ab9222..49879f3 100644
+--- a/src/internal_modules/roc_netio/target_libuv/roc_netio/tcp_connection_port.cpp
++++ b/src/internal_modules/roc_netio/target_libuv/roc_netio/tcp_connection_port.cpp
+@@ -804,7 +804,7 @@ void TcpConnectionPort::format_descriptor(core::StringBuilder& b) {
+     }
+ 
+     b.append_str(" 0x");
+-    b.append_uint((unsigned long)this, 16);
++    b.append_uint((uintptr_t)this, 16);
+ 
+     b.append_str(" local=");
+     b.append_str(address::socket_addr_to_str(local_address_).c_str());
+diff --git a/src/internal_modules/roc_netio/target_libuv/roc_netio/tcp_server_port.cpp b/src/internal_modules/roc_netio/target_libuv/roc_netio/tcp_server_port.cpp
+index 5814784..4f39f13 100644
+--- a/src/internal_modules/roc_netio/target_libuv/roc_netio/tcp_server_port.cpp
++++ b/src/internal_modules/roc_netio/target_libuv/roc_netio/tcp_server_port.cpp
+@@ -325,7 +325,7 @@ void TcpServerPort::format_descriptor(core::StringBuilder& b) {
+     b.append_str("<tcpserv");
+ 
+     b.append_str(" 0x");
+-    b.append_uint((unsigned long)this, 16);
++    b.append_uint((uintptr_t)this, 16);
+ 
+     b.append_str(" bind=");
+     b.append_str(address::socket_addr_to_str(config_.bind_address).c_str());
+diff --git a/src/internal_modules/roc_netio/target_libuv/roc_netio/udp_port.cpp b/src/internal_modules/roc_netio/target_libuv/roc_netio/udp_port.cpp
+index fda4100..0e6a6b3 100644
+--- a/src/internal_modules/roc_netio/target_libuv/roc_netio/udp_port.cpp
++++ b/src/internal_modules/roc_netio/target_libuv/roc_netio/udp_port.cpp
+@@ -464,7 +464,8 @@ bool UdpPort::try_nonblocking_write_(const packet::PacketPtr& pp) {
+ 
+     const packet::UDP& udp = *pp->udp();
+     const bool success =
+-        socket_try_send_to(fd_, pp->buffer().data(), pp->buffer().size(), udp.dst_addr);
++        socket_try_send_to((SocketHandle)fd_, pp->buffer().data(), pp->buffer().size(),
++                           udp.dst_addr) == (ssize_t)pp->buffer().size();
+ 
+     if (success) {
+         const int packet_num = ++sent_packets_;
+@@ -580,7 +581,7 @@ void UdpPort::format_descriptor(core::StringBuilder& b) {
+     b.append_str("<udp");
+ 
+     b.append_str(" 0x");
+-    b.append_uint((unsigned long)this, 16);
++    b.append_uint((uintptr_t)this, 16);
+ 
+     b.append_str(" bind=");
+     b.append_str(address::socket_addr_to_str(config_.bind_address).c_str());
+@@ -590,3 +591,4 @@ void UdpPort::format_descriptor(core::StringBuilder& b) {
+ 
+ } // namespace netio
+ } // namespace roc
++
+diff --git a/src/internal_modules/roc_netio/target_windows/roc_netio/socket_ops.cpp b/src/internal_modules/roc_netio/target_windows/roc_netio/socket_ops.cpp
+new file mode 100644
+index 0000000..d587694
+--- /dev/null
++++ b/src/internal_modules/roc_netio/target_windows/roc_netio/socket_ops.cpp
+@@ -0,0 +1,147 @@
++/*
++ * Copyright (c) 2026 Roc Streaming authors
++ * This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. https://mozilla.org/MPL/2.0/.
++ */
++#include "roc_netio/socket_ops.h"
++#include "roc_core/log.h"
++#include "roc_core/panic.h"
++#include <limits.h>
++#include <windows.h>
++
++namespace roc {
++namespace netio {
++namespace {
++INIT_ONCE winsock_once = INIT_ONCE_STATIC_INIT;
++BOOL CALLBACK initialize_winsock(PINIT_ONCE, PVOID, PVOID*) {
++    WSADATA data;
++    const int err = WSAStartup(MAKEWORD(2, 2), &data);
++    if (err) {
++        roc_log(LogError, "socket: WSAStartup failed: error=%d", err);
++        return FALSE;
++    }
++    return TRUE;
++}
++bool fail(const char* operation, int err = WSAGetLastError()) {
++    roc_log(LogError, "socket: %s failed: WSA error=%d", operation, err);
++    return false;
++}
++bool nonblocking(SocketHandle sock) {
++    u_long enabled = 1;
++    return ioctlsocket(sock, FIONBIO, &enabled) == 0 || fail("ioctlsocket");
++}
++ssize_t io_result(int result, bool receiving) {
++    if (result != SOCKET_ERROR) {
++        return receiving && result == 0 ? SockErr_StreamEnd : result;
++    }
++    const int err = WSAGetLastError();
++    if (err == WSAEWOULDBLOCK) {
++        return SockErr_WouldBlock;
++    }
++    fail("I/O", err);
++    return SockErr_Failure;
++}
++}
++
++bool socket_create(address::AddrFamily family, SocketType type, SocketHandle& out) {
++    out = SocketInvalid;
++    if (!InitOnceExecuteOnce(&winsock_once, initialize_winsock, NULL, NULL)) {
++        return false;
++    }
++    int domain;
++    switch (family) {
++    case address::Family_IPv4: domain = AF_INET; break;
++    case address::Family_IPv6: domain = AF_INET6; break;
++    default: roc_panic("socket: unknown address family");
++    }
++    roc_panic_if(type != SocketType_Tcp && type != SocketType_Udp);
++    const int kind = type == SocketType_Tcp ? SOCK_STREAM : SOCK_DGRAM;
++    const SocketHandle sock = socket(domain, kind, 0);
++    if (sock == SocketInvalid) return fail("socket");
++    if (!nonblocking(sock)) {
++        closesocket(sock);
++        return false;
++    }
++    out = sock;
++    return true;
++}
++bool socket_accept(SocketHandle sock, SocketHandle& out, address::SocketAddr& remote) {
++    int len = remote.max_slen();
++    out = accept(sock, remote.saddr(), &len);
++    if (out == SocketInvalid) {
++        if (WSAGetLastError() == WSAEWOULDBLOCK) return false;
++        return fail("accept");
++    }
++    if (!nonblocking(out)) {
++        closesocket(out);
++        out = SocketInvalid;
++        return false;
++    }
++    return true;
++}
++bool socket_setup(SocketHandle sock, const SocketOpts& options) {
++    int enabled = options.disable_nagle ? 1 : 0;
++    return setsockopt(sock, IPPROTO_TCP, TCP_NODELAY,
++                      (const char*)&enabled, sizeof(enabled)) == 0 || fail("TCP_NODELAY");
++}
++bool socket_bind(SocketHandle sock, address::SocketAddr& local) {
++    if (local.family() == address::Family_IPv6) {
++        int enabled = 1;
++        if (setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY,
++                       (const char*)&enabled, sizeof(enabled)) != 0)
++            return fail("IPV6_V6ONLY");
++    }
++    if (bind(sock, local.saddr(), local.slen()) != 0) return fail("bind");
++    int len = local.max_slen();
++    return getsockname(sock, local.saddr(), &len) == 0 || fail("getsockname");
++}
++bool socket_listen(SocketHandle sock, size_t backlog) {
++    return listen(sock, backlog > INT_MAX ? INT_MAX : (int)backlog) == 0 || fail("listen");
++}
++bool socket_begin_connect(SocketHandle sock, const address::SocketAddr& remote,
++                          bool& completed) {
++    completed = connect(sock, remote.saddr(), remote.slen()) == 0;
++    if (completed) return true;
++    const int err = WSAGetLastError();
++    if (err == WSAEWOULDBLOCK || err == WSAEINPROGRESS) return true;
++    return fail("connect", err);
++}
++bool socket_end_connect(SocketHandle sock) {
++    int err = 0;
++    int len = sizeof(err);
++    if (getsockopt(sock, SOL_SOCKET, SO_ERROR, (char*)&err, &len) != 0)
++        return fail("SO_ERROR");
++    return err == 0 || fail("connect", err);
++}
++ssize_t socket_try_recv(SocketHandle sock, void* buf, size_t size) {
++    return io_result(recv(sock, (char*)buf, size > INT_MAX ? INT_MAX : (int)size, 0), true);
++}
++ssize_t socket_try_send(SocketHandle sock, const void* buf, size_t size) {
++    return io_result(send(sock, (const char*)buf, size > INT_MAX ? INT_MAX : (int)size, 0), false);
++}
++ssize_t socket_try_send_to(SocketHandle sock, const void* buf, size_t size,
++                           const address::SocketAddr& remote) {
++    if (size > INT_MAX) {
++        fail("sendto: datagram too large", WSAEMSGSIZE);
++        return SockErr_Failure;
++    }
++    return io_result(sendto(sock, (const char*)buf, (int)size, 0,
++                            remote.saddr(), remote.slen()), false);
++}
++bool socket_shutdown(SocketHandle sock) {
++    return shutdown(sock, SD_BOTH) == 0 || fail("shutdown");
++}
++bool socket_close(SocketHandle sock) {
++    return closesocket(sock) == 0 || fail("closesocket");
++}
++bool socket_close_with_reset(SocketHandle sock) {
++    linger option = { 1, 0 };
++    const bool configured = setsockopt(sock, SOL_SOCKET, SO_LINGER,
++                                       (const char*)&option, sizeof(option)) == 0;
++    if (!configured) fail("SO_LINGER");
++    const bool closed = socket_close(sock);
++    return configured && closed;
++}
++} // namespace netio
++} // namespace roc
++
+diff --git a/src/internal_modules/roc_netio/target_windows/roc_netio/socket_ops.h b/src/internal_modules/roc_netio/target_windows/roc_netio/socket_ops.h
+new file mode 100644
+index 0000000..1e927dc
+--- /dev/null
++++ b/src/internal_modules/roc_netio/target_windows/roc_netio/socket_ops.h
+@@ -0,0 +1,118 @@
++/*
++ * Copyright (c) 2020 Roc Streaming authors
++ *
++ * This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
++ */
++
++//! @file roc_netio/target_windows/roc_netio/socket_ops.h
++//! @brief Socket operations.
++
++#ifndef ROC_NETIO_SOCKET_OPS_H_
++#define ROC_NETIO_SOCKET_OPS_H_
++
++#include "roc_address/socket_addr.h"
++#include "roc_core/attributes.h"
++#include "roc_core/stddefs.h"
++
++namespace roc {
++namespace netio {
++
++//! Socket type.
++enum SocketType {
++    SocketType_Tcp, //!< TCP socket.
++    SocketType_Udp  //!< UDP socket.
++};
++
++//! Socket options.
++struct SocketOpts {
++    //! Disable Nagle's algorithm.
++    bool disable_nagle;
++
++    SocketOpts()
++        : disable_nagle(true) {
++    }
++};
++
++//! I/O error codes.
++enum SocketError {
++    //! Operation can't be performed without blocking, try later.
++    SockErr_WouldBlock = -1,
++
++    //! End of stream, no more data.
++    SockErr_StreamEnd = -2,
++
++    //! Failure.
++    SockErr_Failure = -3
++};
++
++//! Platform-specific socket handle.
++typedef SOCKET SocketHandle;
++
++//! Invalid socket handle.
++const SocketHandle SocketInvalid = INVALID_SOCKET;
++
++//! Create non-blocking socket.
++ROC_ATTR_NODISCARD bool
++socket_create(address::AddrFamily family, SocketType type, SocketHandle& new_sock);
++
++//! Accept incoming connection.
++ROC_ATTR_NODISCARD bool socket_accept(SocketHandle sock,
++                                      SocketHandle& new_sock,
++                                      address::SocketAddr& remote_address);
++
++//! Set socket options.
++ROC_ATTR_NODISCARD bool socket_setup(SocketHandle sock, const SocketOpts& options);
++
++//! Bind socket to local address.
++ROC_ATTR_NODISCARD bool socket_bind(SocketHandle sock,
++                                    address::SocketAddr& local_address);
++
++//! Start listening for incoming connections.
++ROC_ATTR_NODISCARD bool socket_listen(SocketHandle sock, size_t backlog);
++
++//! Initiate connecting to remote peer.
++//! @returns true if connection was successfully initiated.
++//! Sets @p completed_immediately to true if connection was established
++//! immediately and there is no need to wait for it.
++ROC_ATTR_NODISCARD bool socket_begin_connect(SocketHandle sock,
++                                             const address::SocketAddr& remote_address,
++                                             bool& completed_immediately);
++
++//! Finish connecting to remote peer.
++//! @returns true if connection was successfully established.
++ROC_ATTR_NODISCARD bool socket_end_connect(SocketHandle sock);
++
++//! Try to read bytes from socket without blocking.
++//! @returns number of bytes read (>= 0) or SocketError (< 0).
++ROC_ATTR_NODISCARD ssize_t socket_try_recv(SocketHandle sock, void* buf, size_t bufsz);
++
++//! Try to write bytes to socket without blocking.
++//! @returns number of bytes written (>= 0) or SocketError (< 0).
++ROC_ATTR_NODISCARD ssize_t socket_try_send(SocketHandle sock,
++                                           const void* buf,
++                                           size_t bufsz);
++
++//! Try to send datagram via socket to given address, without blocking.
++//! @returns number of bytes written (>= 0) or SocketError (< 0).
++ROC_ATTR_NODISCARD ssize_t socket_try_send_to(SocketHandle sock,
++                                              const void* buf,
++                                              size_t bufsz,
++                                              const address::SocketAddr& remote_address);
++
++//! Gracefully shutdown connection.
++ROC_ATTR_NODISCARD bool socket_shutdown(SocketHandle sock);
++
++//! Close socket.
++ROC_ATTR_NODISCARD bool socket_close(SocketHandle sock);
++
++//! Close socket and send reset to remote peer.
++//! Remote peer will get error when reading from connection.
++ROC_ATTR_NODISCARD bool socket_close_with_reset(SocketHandle sock);
++
++} // namespace netio
++} // namespace roc
++
++#endif // ROC_NETIO_SOCKET_OPS_H_
++
+diff --git a/src/internal_modules/roc_rtcp/composer.cpp b/src/internal_modules/roc_rtcp/composer.cpp
+index 361dc9d..89ab158 100644
+--- a/src/internal_modules/roc_rtcp/composer.cpp
++++ b/src/internal_modules/roc_rtcp/composer.cpp
+@@ -7,6 +7,7 @@
+  */
+ 
+ #include "roc_rtcp/composer.h"
++#include <stdint.h>
+ #include "roc_core/align_ops.h"
+ #include "roc_core/log.h"
+ #include "roc_core/panic.h"
+@@ -20,7 +21,7 @@ Composer::Composer() {
+ bool Composer::align(core::Slice<uint8_t>& buffer,
+                      size_t header_size,
+                      size_t payload_alignment) {
+-    if ((unsigned long)buffer.data() % payload_alignment != 0) {
++    if ((uintptr_t)buffer.data() % payload_alignment != 0) {
+         roc_panic("rtcp composer: unexpected non-aligned buffer");
+     }
+ 
+diff --git a/src/internal_modules/roc_rtp/composer.cpp b/src/internal_modules/roc_rtp/composer.cpp
+index d267d86..0f61fef 100644
+--- a/src/internal_modules/roc_rtp/composer.cpp
++++ b/src/internal_modules/roc_rtp/composer.cpp
+@@ -11,6 +11,7 @@
+ #include "roc_core/log.h"
+ #include "roc_core/panic.h"
+ #include "roc_rtp/headers.h"
++#include <stdint.h>
+ 
+ namespace roc {
+ namespace rtp {
+@@ -22,7 +23,7 @@ Composer::Composer(packet::IComposer* inner_composer)
+ bool Composer::align(core::Slice<uint8_t>& buffer,
+                      size_t header_size,
+                      size_t payload_alignment) {
+-    if ((unsigned long)buffer.data() % payload_alignment != 0) {
++    if ((uintptr_t)buffer.data() % payload_alignment != 0) {
+         roc_panic("rtp composer: unexpected non-aligned buffer");
+     }
+ 
+diff --git a/src/internal_modules/roc_sndio/wav_sink.cpp b/src/internal_modules/roc_sndio/wav_sink.cpp
+index ea5133a..cbaf96e 100644
+--- a/src/internal_modules/roc_sndio/wav_sink.cpp
++++ b/src/internal_modules/roc_sndio/wav_sink.cpp
+@@ -10,6 +10,7 @@
+ #include "roc_audio/pcm_format.h"
+ #include "roc_audio/sample_format.h"
+ #include "roc_core/endian_ops.h"
++#include "roc_core/errno_to_str.h"
+ #include "roc_core/log.h"
+ #include "roc_core/panic.h"
+ 
+diff --git a/src/internal_modules/roc_sndio/wav_source.cpp b/src/internal_modules/roc_sndio/wav_source.cpp
+index eefae03..46ad806 100644
+--- a/src/internal_modules/roc_sndio/wav_source.cpp
++++ b/src/internal_modules/roc_sndio/wav_source.cpp
+@@ -7,6 +7,7 @@
+  */
+ 
+ #include "roc_sndio/wav_source.h"
++#include "roc_core/errno_to_str.h"
+ #include "roc_core/log.h"
+ #include "roc_core/panic.h"
+ 

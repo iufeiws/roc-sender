@@ -1,0 +1,12 @@
+# Copy and edit. CLI settings override this file.
+# Use --list-devices to list WASAPI recording inputs and output loopbacks.
+capture_mode = "loopback"
+device = "CABLE Input"
+# To capture another playback output: capture_mode = "loopback", device = "Speakers".
+# Alternatively remove device and set device_index = 25 (indices may change).
+dll = "build/Release/roc.dll"
+# Replace the documentation-only address with the receiver's address before running.
+source = "rtp+rs8m://192.0.2.1:10001"
+repair = "rs8m://192.0.2.1:10002"
+control = "rtcp://192.0.2.1:10003"
+chunk_frames = 480

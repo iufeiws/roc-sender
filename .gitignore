@@ -1,0 +1,36 @@
+# Python bytecode and local analysis caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local Python environments
+.conda/
+.venv/
+venv/
+
+# Downloaded third-party sources and toolchains (restored by setup.ps1)
+vendor/
+tools/
+
+# Build outputs
+build/
+dist/
+
+# Runtime logs
+*.log
+
+# Local GUI screenshots (not referenced by project sources)
+assets/desktop-preview.png
+assets/desktop-monitor-preview.png
+
+# Local secrets and environment overrides
+.env
+.env.*
+!.env.example
+
+# OS metadata
+.DS_Store
+Thumbs.db
+desktop.ini

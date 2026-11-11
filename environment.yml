@@ -1,0 +1,8 @@
+name: roc-sender
+channels:
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - PyAudioWPatch==0.2.12.8
