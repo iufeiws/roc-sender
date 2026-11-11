@@ -1,3 +1,8 @@
+param(
+    # Skip the Python environment; fetch and patch only what build.ps1 needs.
+    [switch]$NativeOnly
+)
+
 $ErrorActionPreference = 'Stop'
 
 function Assert-LastExitCode([string]$Operation) {
@@ -26,7 +31,7 @@ function Get-VerifiedArchive([string]$Uri, [string]$File, [string]$Sha256) {
     }
 }
 
-if (-not (Test-Path .conda/python.exe)) {
+if (-not $NativeOnly -and -not (Test-Path .conda/python.exe)) {
     conda env create --prefix ./.conda --file environment.yml
     Assert-LastExitCode 'Creating the Conda environment'
 }

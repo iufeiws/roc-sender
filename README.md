@@ -33,6 +33,10 @@ build/Release/libc++.dll
 build/Release/libunwind.dll
 ```
 
+也可以从 GitHub Release 取预编译产物：推送 `native-v*` 标签时，`Native build` 流程在 Windows
+runner 上执行 `setup.ps1 -NativeOnly` 与 `build.ps1`，发布 `roc-windows-x64.zip`（`bin/` 下三个 DLL、
+`include/roc` 公共头文件、许可证与 Roc 提交号）及其 SHA-256。
+
 ## 配置和发送
 
 先查看当前机器的 WASAPI 录音输入和 Loopback 设备（列表标明采集类型）：
