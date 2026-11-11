@@ -13,6 +13,8 @@ function Get-PinnedRepository([string]$Uri, [string]$Directory, [string]$Commit)
     if (-not (Test-Path "$Directory/.git")) {
         git clone $Uri $Directory
         Assert-LastExitCode "Cloning $Uri"
+        git -C $Directory checkout --quiet --detach $Commit
+        Assert-LastExitCode "Checking out $Commit"
     }
     $actual = git -C $Directory rev-parse HEAD
     Assert-LastExitCode "Reading $Directory revision"
