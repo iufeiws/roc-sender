@@ -13,12 +13,17 @@ permissions:
 jobs:
   build:
     runs-on: windows-2025
+    defaults:
+      run:
+        shell: pwsh
     steps:
+      # The Roc patch must keep LF line endings to apply.
+      - run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
 
       - name: Fetch pinned sources and toolchain
         shell: pwsh
-        run: ./setup.ps1 -NativeOnly
+        run: try { ./setup.ps1 -NativeOnly } catch { Write-Host "::error::$($_.Exception.Message)"; throw }
 
       - name: Ensure Ninja
         shell: pwsh
@@ -29,7 +34,7 @@ jobs:
 
       - name: Build
         shell: pwsh
-        run: ./build.ps1
+        run: try { ./build.ps1 } catch { Write-Host "::error::$($_.Exception.Message)"; throw }
 
       - name: Package
         shell: pwsh
